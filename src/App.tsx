@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Trash2, Plus, Trophy, User, CheckCircle2, Circle, RefreshCw, X } from 'lucide-react';
+import { Trash2, Plus, Trophy, User, CheckCircle2, Circle, RefreshCw, X, History, ChevronDown } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
 type Participant = {
@@ -8,6 +8,50 @@ type Participant = {
   name: string;
   active: boolean;
 };
+
+type HistoryEntry = {
+  id: string;
+  timestamp: number;
+  participants: Participant[];
+  winnerName: string;
+};
+
+const STORAGE_KEY_PARTICIPANTS = 'radvanfortuin:participants';
+const STORAGE_KEY_HISTORY = 'radvanfortuin:history';
+const HISTORY_MAX = 10;
+
+const DEFAULT_PARTICIPANTS: Participant[] = [
+  { id: '1', name: 'Alice', active: true },
+  { id: '2', name: 'Bob', active: true },
+  { id: '3', name: 'Charlie', active: true },
+  { id: '4', name: 'David', active: true },
+];
+
+function loadFromStorage<T>(key: string, fallback: T): T {
+  if (typeof window === 'undefined') return fallback;
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return fallback;
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function saveToStorage(key: string, value: unknown) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Storage quota exceeded or unavailable — silently ignore
+  }
+}
+
+function formatTimestamp(ts: number) {
+  return new Date(ts).toLocaleString('nl-NL', {
+    day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
+  });
+}
 
 const COLORS = [
   '#6366f1', // indigo-500
@@ -33,16 +77,25 @@ function polarToCartesian(centerX: number, centerY: number, radius: number, angl
 }
 
 export default function App() {
-  const [participants, setParticipants] = useState<Participant[]>([
-    { id: '1', name: 'Alice', active: true },
-    { id: '2', name: 'Bob', active: true },
-    { id: '3', name: 'Charlie', active: true },
-    { id: '4', name: 'David', active: true },
-  ]);
+  const [participants, setParticipants] = useState<Participant[]>(() =>
+    loadFromStorage<Participant[]>(STORAGE_KEY_PARTICIPANTS, DEFAULT_PARTICIPANTS)
+  );
+  const [history, setHistory] = useState<HistoryEntry[]>(() =>
+    loadFromStorage<HistoryEntry[]>(STORAGE_KEY_HISTORY, [])
+  );
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [newName, setNewName] = useState('');
   const [rotation, setRotation] = useState(0);
   const [spinning, setSpinning] = useState(false);
   const [winner, setWinner] = useState<Participant | null>(null);
+
+  useEffect(() => {
+    saveToStorage(STORAGE_KEY_PARTICIPANTS, participants);
+  }, [participants]);
+
+  useEffect(() => {
+    saveToStorage(STORAGE_KEY_HISTORY, history);
+  }, [history]);
 
   const activeParticipants = participants.filter(p => p.active);
 
@@ -99,6 +152,15 @@ export default function App() {
     setTimeout(() => {
       setSpinning(false);
       setWinner(selectedWinner);
+      setHistory(prev => [
+        {
+          id: crypto.randomUUID(),
+          timestamp: Date.now(),
+          participants: participants.map(p => ({ ...p })),
+          winnerName: selectedWinner.name,
+        },
+        ...prev,
+      ].slice(0, HISTORY_MAX));
       confetti({
         particleCount: 150,
         spread: 90,
@@ -112,6 +174,22 @@ export default function App() {
   const removeWinnerFromWheel = () => {
     if (winner) toggleActive(winner.id);
     setWinner(null);
+  };
+
+  const loadHistoryEntry = (entry: HistoryEntry) => {
+    if (spinning) return;
+    setParticipants(entry.participants.map(p => ({ ...p, active: true })));
+    setHistoryOpen(false);
+    setWinner(null);
+  };
+
+  const deleteHistoryEntry = (id: string) => {
+    setHistory(prev => prev.filter(e => e.id !== id));
+  };
+
+  const clearHistory = () => {
+    setHistory([]);
+    setHistoryOpen(false);
   };
 
   const renderNameOnWheel = (name: string) => {
@@ -218,6 +296,62 @@ export default function App() {
           <h1 className="text-2xl font-bold tracking-tight text-indigo-600">Rad van fortuin</h1>
           <p className="text-sm text-slate-500 mt-1">Voeg namen toe en draai aan het rad.</p>
         </div>
+
+        {history.length > 0 && (
+          <div className="mb-6 relative">
+            <button
+              type="button"
+              onClick={() => setHistoryOpen(o => !o)}
+              disabled={spinning}
+              className="w-full flex items-center justify-between gap-2 px-4 py-2.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-sm font-semibold text-slate-700 transition-colors disabled:opacity-50"
+              aria-expanded={historyOpen}
+            >
+              <span className="flex items-center gap-2">
+                <History className="w-4 h-4 text-indigo-500" />
+                Vorige rondes ({history.length})
+              </span>
+              <ChevronDown className={`w-4 h-4 transition-transform ${historyOpen ? 'rotate-180' : ''}`} />
+            </button>
+
+            {historyOpen && (
+              <div className="absolute left-0 right-0 top-full mt-2 bg-white border border-slate-200 rounded-lg shadow-lg z-20 max-h-80 overflow-y-auto custom-scrollbar">
+                <ul className="divide-y divide-slate-100">
+                  {history.map(entry => (
+                    <li key={entry.id} className="p-3 hover:bg-slate-50 flex items-start gap-2">
+                      <button
+                        onClick={() => loadHistoryEntry(entry)}
+                        className="flex-1 text-left"
+                        title="Laad deze deelnemers"
+                      >
+                        <div className="text-xs text-slate-400 font-medium">
+                          {formatTimestamp(entry.timestamp)} · {entry.participants.length} deelnemers
+                        </div>
+                        <div className="text-sm text-slate-700 mt-0.5 truncate">
+                          🏆 {entry.winnerName}
+                        </div>
+                      </button>
+                      <button
+                        onClick={() => deleteHistoryEntry(entry.id)}
+                        className="text-slate-300 hover:text-rose-500 transition-colors p-1"
+                        title="Verwijder ronde"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                <div className="p-2 border-t border-slate-100 bg-slate-50">
+                  <button
+                    onClick={clearHistory}
+                    className="w-full text-xs font-semibold text-slate-500 hover:text-rose-600 py-1.5 transition-colors"
+                  >
+                    Wis alle geschiedenis
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         <form onSubmit={handleAdd} className="flex flex-col gap-3 lg:gap-4 mb-6 lg:mb-8">
           <label className="text-xs font-semibold tracking-wider text-slate-400">Nieuwe deelnemer</label>
