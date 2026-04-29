@@ -8,6 +8,12 @@ This contains everything you need to run your app locally.
 
 View your app in AI Studio: https://ai.studio/apps/7690b1c1-cb4b-451f-a16a-72f03c573c55
 
+## Live op Vercel
+
+https://rad-van-fortuin-chi.vercel.app
+
+Auto-deploy: elke push naar `main` deploy't automatisch via Vercel.
+
 ## Run Locally
 
 **Prerequisites:**  Node.js
